@@ -1,0 +1,228 @@
+##########################################################################################
+#
+# Copyright (c) 2021 NOV Inc.
+#
+# Product: MAX Edge
+# Version: 3.2.0
+#
+##########################################################################################
+
+version: "2"
+
+services:
+  ##########################################################################################
+  #
+  ############# BASELINE SERVICES THAT ALWAYS NEED TO BE DEPLOYED ##########################
+  #
+  ##########################################################################################
+
+  maxedge-core-sql:
+    container_name: maxedge-core-sql
+    networks:
+      - maxedge
+    restart: always
+    image: 311476699545.dkr.ecr.us-east-1.amazonaws.com/ss01-prod-maxedge-core-sql:3.2.0-1
+    volumes:
+      - maxedge-core-sql:/var/lib/postgresql/data
+    ports:
+      - 5010:5432
+    labels:
+      - "com.nov.maxedge.category=base"
+
+  maxedge-core-messagebus:
+    container_name: maxedge-core-messagebus
+    networks:
+      - maxedge
+    restart: always
+    image: 311476699545.dkr.ecr.us-east-1.amazonaws.com/ss01-prod-maxedge-core-messagebus:3.2.0
+    ports:
+      - 5004:4222
+      - 5005:8222
+    labels:
+      - "com.nov.maxedge.category=base"
+
+  maxapi-tagmanager:
+    container_name: maxapi-tagmanager
+    networks:
+      - maxedge
+    restart: always
+    image: 311476699545.dkr.ecr.us-east-1.amazonaws.com/ss01-prod-maxapi-tagmanager:1.22.0-51-rc
+    ports:
+      - 8001:8080
+      - 8002:8081
+      - 8003:7777
+    depends_on:
+      - maxedge-core-sql
+      - maxedge-core-messagebus
+    environment:
+      env: edge
+      CONFIG_FILE_NAME: edge
+      GODEBUG: "madvdontneed=1"
+      NATSBroker: maxedge-core-messagebus:4222
+    volumes:
+      - /opt/edged:/app/node_id
+    labels:
+      - "com.nov.maxedge.category=base"
+
+  maxedge-system-config:
+    container_name: maxedge-system-config
+    networks:
+      - maxedge
+    restart: always
+    image: 311476699545.dkr.ecr.us-east-1.amazonaws.com/ss01-prod-maxedge-system-config:3.2.0-372-rc
+    ports:
+      - 7000:7000
+    depends_on:
+      - maxapi-tagmanager
+    volumes:
+      - maxedge-csvexport:/tmp
+    labels:
+      - "com.nov.maxedge.category=base"
+
+  maxedge-io:
+    container_name: maxedge-io
+    networks:
+      - maxedge
+    restart: always
+    image: 311476699545.dkr.ecr.us-east-1.amazonaws.com/ss01-prod-maxedge-io:3.2.0-2644-rc
+    ports:
+      - 1000:1000/udp #rio sharing
+      - 1001-1029:1001-1029/udp #amphion collector
+      - 8600-8605:8600-8605/udp #omron fins collector
+      - 50010:50010/tcp #canmd collector
+      - 14005:14005/tcp #sys10daq config/calib
+      - 14005:14005/udp #sys10daq raw data
+      - 502:502/tcp # modbus sharing
+      - 502:502/udp # rio sharing
+      - 4840-4845:4840-4845/tcp # opc ua sharing
+      - 6019:6019/tcp #wits listener
+    depends_on:
+      - maxedge-system-config
+    volumes:
+      - /opt/edged:/config # export-maxcloud
+      - /tmp:/tmp # import-gen
+      - /pki:/app/pki # opc ua
+      - /etc/hosts:/etc/hosts # opc ua
+      - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt # witsml
+      - maxedge-io:/store # export maxcloud/azure/aws/google/piwebapi/ftp buffers
+    #environment:
+    #ENABLE_DEBUGGING: 'true'
+    #DEBUG_PORT: ':7777'
+    #ImportNIResourceBackwardsCompatible: 'true' # import-ni
+    privileged: true # serial communications (wits, modbus, mru, ascii)
+    hostname: ${HOSTNAME} # opc ua
+    labels:
+      - "com.nov.maxedge.category=base"
+
+  ##########################################################################################
+  #
+  ############# OPTIONAL MAXEDGE SERVICES BASED ON THE USE CASE ############################
+  #
+  ##########################################################################################
+
+  maxedge-analytics-ae:
+    container_name: maxedge-analytics-ae
+    networks:
+      - maxedge
+    restart: always
+    image: 311476699545.dkr.ecr.us-east-1.amazonaws.com/ss01-prod-maxedge-analytics:3.2.0-46-rc
+    ports:
+      - 5008:10000
+    depends_on:
+      - maxedge-system-config
+    labels:
+      - "com.nov.maxedge.category=application"
+
+  oss-edge-events:
+    container_name: oss-edge-events
+    networks:
+      - maxedge
+    restart: always
+    image: 311476699545.dkr.ecr.us-east-1.amazonaws.com/ss01-prod-oss-edge-events:latest
+    ports:
+      - 8080:8080
+
+  oss-edge-portal-frontend:
+    container_name: oss-edge-portal-frontend-container
+    networks:
+      - maxedge
+    restart: always
+    image: 311476699545.dkr.ecr.us-east-1.amazonaws.com/ss01-prod-oss-edge-frontend:latest
+    ports:
+      - 4200:4200
+
+  # mysqldb:
+  #   image: mysql
+  #   environment:
+  #     - MYSQL_ROOT_PASSWORD=p@ssw0rd1
+  #   volumes:
+  #     - mysql:/var/lib/mysql
+  #     - mysql_config:/etc/mysql
+
+  # maxedge-max-sampleapp:
+  #   container_name: maxedge-sampleapp
+  #   networks:
+  #     - maxedge
+  #   restart: always
+  #   image: 311476699545.dkr.ecr.us-east-1.amazonaws.com/ss01-prod-maxedge-sampleapp:1.0.0-91-rc
+  #   ports:
+  #     - 7887:7887
+
+  ##########################################################################################
+  #
+  ############# OPTIONAL MAXEDGE SERVICES BASED ON THE USE CASE ############################
+  #
+  ##########################################################################################
+
+  maxedge-grafana:
+    container_name: maxedge-grafana
+    networks:
+      - maxedge
+    restart: always
+    image: 311476699545.dkr.ecr.us-east-1.amazonaws.com/ss01-prod-maxedge-core-viz:3.2.0
+    volumes:
+      - maxedge-core-viz:/var/lib/grafana
+    ports:
+      - 5000:3000
+    depends_on:
+      - maxedge-core-sql
+    environment:
+      GF_LOG_LEVEL: error
+    labels:
+      - "com.nov.maxedge.category=application"
+
+##########################################################################################
+#
+############# VOLUMES FOR PERSISTENT STORAGE #############################################
+#
+##########################################################################################
+
+volumes:
+  maxedge-core-sql:
+  maxedge-io:
+  maxedge-csvexport:
+  maxedge-core-viz:
+  maxedge-oss:
+  # mysql:
+  # mysql_config:
+## Optional volume customizations
+#    driver: local
+#    driver_opts:
+#      o: "size=1000m,bind" # limit of 1GB on the size
+#      device: /media/sd-mmcblk0p1 # bind a folder which is not the default for docker volumes
+#      type: volume
+
+##########################################################################################
+#
+############# NETWORKS ###################################################################
+#
+##########################################################################################
+
+networks:
+  maxedge:
+    driver: "bridge"
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.236.64.0/19
+          gateway: 10.236.64.1
